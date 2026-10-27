@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AICES · Content Integrity</title>
+  <script>
+    // Apply the saved theme before the page paints (avoids a flash)
+    try { const t = localStorage.getItem("aices-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left mono">AI Integrity<br>Assessment System</div>
+  <div class="topbar-center mono">AICES · v1.0 · 2026</div>
+  <div class="topbar-right">
+    {% if show_advanced %}
+    <div class="version" role="radiogroup" aria-label="Model version">
+      <label><input type="radio" name="version" value="baseline" checked> Baseline</label>
+      <label><input type="radio" name="version" value="advanced"> Advanced</label>
+      <label><input type="radio" name="version" value="compare"> Compare</label>
+    </div>
+    {% else %}
+    <span class="chip-badge mono">Baseline models</span>
+    {% endif %}
+    <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle dark / light mode" title="Dark / Light">
+      <svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M5.2 18.8l1.6-1.6M17.2 6.8l1.6-1.6"/></g></svg>
+      <svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="eyebrow mono"><span></span>Integrity Assessment System<span></span></div>
+  <h1 class="logo-big"><span>AI</span><em>CES</em></h1>
+  <div class="mono sub-title">AI Content Integrity Evaluation System</div>
+  <p class="lead">Analyze AI-generated content across integrity dimensions: <b>Bias</b>, <b>Hallucination</b>,
+    <b>Privacy</b> and <b>Deepfake images</b>, with an explanation for every decision and a composite Integrity Score.</p>
+</section>
+
+<nav class="mainnav mono" aria-label="Sections">
+  <button class="navtab active" data-tab="analyze"><i></i>Analyze Content</button>
+  <button class="navtab" data-tab="pipeline"><i></i>Pipeline &amp; Models</button>
+  <button class="navtab" data-tab="bench"><i></i>Benchmarks &amp; Formula</button>
+  <button class="navtab" data-tab="history"><i></i>History</button>
+</nav>
+
+<main>
+  <!-- ================= ANALYZE ================= -->
+  <section id="tab-analyze" class="panel">
+    <div class="subtabs mono" role="tablist">
+      <button class="subtab active" data-sub="text">✎ Text Input</button>
+      <button class="subtab" data-sub="image">▣ Deepfake Image</button>
+      <span id="status" class="status mono"></span>
+    </div>
+
+    <div id="sub-text" class="subpanel">
+      <form id="text-form" class="form">
+        <label><span class="mono lbl">Question / Topic</span>
+          <span class="hint">used for the one-sidedness check and Wikipedia evidence</span>
+          <input id="question" placeholder="e.g. Should India invest more in nuclear energy?">
+        </label>
+        <label><span class="mono lbl">AI-Generated Content to Evaluate</span>
+          <textarea id="answer" rows="7" placeholder="Paste AI-generated text here for integrity evaluation..."></textarea>
+        </label>
+        <label><span class="mono lbl">Reference Text <em>(optional)</em></span>
+          <span class="hint">leave empty to fetch evidence from Wikipedia</span>
+          <textarea id="reference" rows="3" placeholder="Paragraph with the correct facts..."></textarea>
+        </label>
+        <div class="row">
+          <button type="submit" class="btn-primary mono">Evaluate →</button>
+          <button type="button" id="sample" class="btn-ghost mono">Load sample</button>
+        </div>
+      </form>
+      <div id="text-results"></div>
+    </div>
+
+    <div id="sub-image" class="subpanel hidden">
+      <form id="image-form" class="form">
+        <label class="drop" id="drop">
+          <input type="file" id="image" accept="image/*">
+          <span class="mono lbl">Upload image</span>
+          <span class="hint">PNG / JPG · any image · the model shows how suspicious it is of being AI-generated (0–100%)</span>
+          <img id="preview" class="preview hidden" alt="preview">
+        </label>
+        <div class="row"><button type="submit" class="btn-primary mono">Check Image →</button></div>
+      </form>
+      <div id="image-results"></div>
+    </div>
+  </section>
+
+  <!-- ================= PIPELINE ================= -->
+  <section id="tab-pipeline" class="panel hidden">
+    <h2 class="section-title">How AICES works</h2>
+    <ol class="flow mono">
+      <li><b>01</b>Input text<br><small>question + answer + reference</small></li>
+      <li><b>02</b>Sentence split<br><small>each sentence checked separately</small></li>
+      <li><b>03</b>ML modules<br><small>bias · hallucination · privacy</small></li>
+      <li><b>04</b>Explainability<br><small>LIME / LR weights · occlusion map</small></li>
+      <li><b>05</b>Integrity Score<br><small>weighted harmonic mean · verdict</small></li>
+    </ol>
+    <div id="module-cards" class="grid"></div>
+  </section>
+
+  <!-- ================= BENCHMARKS ================= -->
+  <section id="tab-bench" class="panel hidden">
+    <h2 class="section-title">Integrity Score formula</h2>
+    <div class="card formula">
+      <div class="kicker">Weighted harmonic mean</div>
+      <div class="eq">Integrity Score = <span>Σ wᵢ / Σ (wᵢ / Sᵢ)</span></div>
+      <div class="mono weights" id="eq-weights"></div>
+      <p class="hint">Each module score Sᵢ is 0–100 (100 = clean). The harmonic mean penalises the weakest module the most:
+        with Bias 90, Hallucination 90 and Privacy 10 a simple average gives 66, but the harmonic mean gives <b>26</b>, because a single leak makes the content untrustworthy.
+        Unavailable modules are left out of the formula.</p>
+      <div class="bands mono">
+        <span class="band good">≥ 80 · Trustworthy</span>
+        <span class="band warn">60–79 · Needs review</span>
+        <span class="band bad">&lt; 60 · High risk</span>
+      </div>
+      <ul class="rules">
+        <li><b>Bias</b> = 100 × (1 − max(1.0 × A identity, 0.8 × B framing, 0.6 × C one-sided)), weighted by severity · A, B risk = max(0, (p − 0.5) / 0.5) · C = |PRO − CON| / (PRO + CON) × min(1, (PRO + CON) / 2)</li>
+        <li><b>Hallucination</b> = 100 × (1 − average P(hallucinated) per sentence)</li>
+        <li><b>Privacy</b> = 100 − penalties (ID / financial 35 · email / phone 20 · address / DOB / online 15 · name 10)</li>
+      </ul>
+    </div>
+    <h2 class="section-title">Model benchmarks <small class="mono">test set</small></h2>
+    <div class="card table-wrap">
+      <table class="bench">
+        <thead><tr><th>Module</th><th>Dataset</th><th>Model</th><th>Accuracy</th><th>F1</th><th>ROC-AUC</th></tr></thead>
+        <tbody id="bench-body"></tbody>
+      </table>
+    </div>
+    <p class="hint">Numbers are read from <code>models/baseline/metrics.json</code>. "—" means the number has not been recorded yet.</p>
+  </section>
+
+  <!-- ================= HISTORY ================= -->
+  <section id="tab-history" class="panel hidden">
+    <div class="row between">
+      <h2 class="section-title">Recent evaluations</h2>
+      <button id="clear-history" class="btn-ghost mono" type="button">Clear</button>
+    </div>
+    <div id="history-list"></div>
+  </section>
+</main>
+
+<footer class="foot mono">AICES · B.Tech CSE Project · scikit-learn · PyTorch · Flask</footer>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

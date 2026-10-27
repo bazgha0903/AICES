@@ -1,0 +1,4 @@
+{
+  "model": "cross-encoder/nli-distilroberta-base",
+  "note": "Pretrained NLI model used zero-shot for one-sided (stance) detection on any topic. Falls back to m1c_stance.joblib if transformers is not installed."
+}

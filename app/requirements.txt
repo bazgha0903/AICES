@@ -1,0 +1,14 @@
+# App + text modules (baseline)
+flask>=3.0
+scikit-learn==1.6.1   # must match the version the models were trained with on Kaggle
+numpy
+pandas
+joblib
+pillow
+matplotlib
+lime                # explainability (without it, the app shows Logistic Regression word weights)
+
+# Pretrained models: one-sided bias (NLI), hallucination contradiction check (NLI), AI-image detector
+torch
+transformers
+# TensorFlow is only needed for the older Keras image notebooks in training/ (not used by the app)

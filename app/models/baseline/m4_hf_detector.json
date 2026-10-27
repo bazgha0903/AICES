@@ -1,0 +1,4 @@
+{
+  "model": "Organika/sdxl-detector",
+  "note": "Pretrained Swin Transformer AI-image detector from HuggingFace (license CC-BY-NC-3.0, non-commercial). Change 'model' to try another image-classification detector."
+}

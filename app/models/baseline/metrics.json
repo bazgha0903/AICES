@@ -1,0 +1,51 @@
+{
+  "_note": "Test-set numbers from the Kaggle training runs (decimals, e.g. 0.852). null = not recorded yet. Shown in the app's Benchmarks tab.",
+  "m1a_identity_bias": {
+    "name": "M1 Bias: identity",
+    "dataset": "Jigsaw Unintended Bias",
+    "model": "TF-IDF + Logistic Regression (+ group lexicon)",
+    "accuracy": null,
+    "f1": null,
+    "auc": null
+  },
+  "m1b_framing_bias": {
+    "name": "M1 Bias: framing",
+    "dataset": "BABE",
+    "model": "TF-IDF + Logistic Regression",
+    "accuracy": null,
+    "f1": null,
+    "auc": null
+  },
+  "m1c_stance": {
+    "name": "M1 Bias: one-sided (fallback model)",
+    "dataset": "IBM Debater Claim Stance",
+    "model": "TF-IDF + Logistic Regression",
+    "accuracy": null,
+    "f1": null,
+    "auc": null
+  },
+  "m2_hallucination": {
+    "name": "M2 Hallucination",
+    "dataset": "HaluEval (QA)",
+    "model": "3 overlap features + Logistic Regression",
+    "accuracy": 0.852,
+    "f1": 0.851,
+    "auc": 0.91
+  },
+  "m3_privacy": {
+    "name": "M3 Privacy (PII)",
+    "dataset": "ai4privacy",
+    "model": "Word features + Logistic Regression",
+    "accuracy": null,
+    "f1": null,
+    "auc": null
+  },
+  "m4_deepfake_cnn": {
+    "name": "M4 AI-generated image",
+    "dataset": "pretrained (Organika/sdxl-detector)",
+    "model": "Swin Transformer (pretrained detector)",
+    "accuracy": null,
+    "f1": null,
+    "auc": null
+  }
+}

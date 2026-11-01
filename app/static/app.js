@@ -36,7 +36,7 @@ const MODULES = [
   { key: "bias", tag: "M1", name: "Bias", what: "All bias types in one module: identity (stereotypes about gender, religion, race), framing (loaded / opinionated words) and one-sided arguments", data: "Jigsaw Unintended Bias · BABE · IBM Claim Stance", model: "Identity: TF-IDF + LR + group lexicon · Framing: TF-IDF + LR · One-sided: pretrained NLI (zero-shot)", xai: "LIME / word weights · PRO / CON per sentence", keys: ["identity_bias", "framing_bias", "stance"] },
   { key: "hallucination", tag: "M2", name: "Hallucination", what: "Answer not supported by the facts", data: "HaluEval (QA)", model: "3 overlap features + Logistic Regression", xai: "Feature contributions" },
   { key: "privacy", tag: "M3", name: "Privacy leakage", what: "Names, emails, phones, addresses, IDs", data: "ai4privacy PII", model: "Word features + Logistic Regression", xai: "Highlighted spans" },
-  { key: "deepfake", tag: "M4", name: "AI-generated image", what: "How suspicious an image is of being AI-generated", data: "Pretrained on real vs AI images", model: "Pretrained Swin Transformer (Organika/sdxl-detector)", xai: "Occlusion map" },
+  { key: "deepfake", tag: "M4", name: "AI-generated image", what: "How suspicious an image is of being AI-generated", data: "Pretrained detectors + face CNN trained on 140k Real and Fake Faces", model: "Ensemble of 3 pretrained detectors (Swin, SwinV2, SigLIP), median + face CNN check", xai: "Occlusion map" },
 ];
 
 fetch("/api/status").then((r) => r.json()).then((s) => {
@@ -230,6 +230,7 @@ $("#image").addEventListener("change", () => {
   if (!f) return;
   $("#preview").src = URL.createObjectURL(f);
   $("#preview").classList.remove("hidden");
+  $("#image-results").innerHTML = "";  // remove the old result so it is never mistaken for this image
 });
 
 $("#image-form").addEventListener("submit", async (e) => {
@@ -249,9 +250,13 @@ $("#image-form").addEventListener("submit", async (e) => {
     const title = multi ? `<div class="vtitle">${esc(r.version)}</div>` : "";
     if (!d.available) return `<div class="result">${title}<div class="card mod">${head("M4", "AI-generated image check", d)}${na(d)}</div></div>`;
     const c = d.level === "High" ? "var(--bad)" : d.level === "Medium" ? "var(--warn)" : "var(--good)";
+    // The face check can turn "Uncertain" into "Low"; then the % is the detectors' score, not the final level
+    const byFace = d.level === "Low" && d.face_prob != null && d.suspicion >= 30;
     return `<div class="result">${title}<div class="card mod">
-      <div class="mod-head"><h3><small>M4</small>AI-generated image check</h3><span class="pill" style="background:${c}">${d.suspicion}% suspicious · ${d.level}</span></div>
-      <div class="small"><b>${d.label}</b> · ${esc(d.model)} · P(AI) = ${d.prob_fake} · Low &lt; 30% · Medium 30–70% · High ≥ 70%</div>
+      <div class="mod-head"><h3><small>M4</small>AI-generated image check</h3><span class="pill" style="background:${c}">${d.suspicion}% suspicious · ${d.level === "Medium" ? "Uncertain" : d.level}${byFace ? " (face check)" : ""}</span></div>
+      <div class="small"><b>${esc(d.label)}</b> · ${esc(d.model)} · P(AI) = ${esc(d.prob_text || d.prob_fake)} · ${esc(d.thresholds || "")}</div>
+      ${(d.notes || []).length ? `<ul class="small notes">${d.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+      ${(d.detectors || []).length > 1 ? `<div class="small"><b>Each detector, P(AI):</b> ${d.detectors.map((x) => `${esc(x.name)} <b style="color:${x.prob >= 0.5 ? "var(--bad)" : "var(--good)"}">${pct(x.prob)}</b>`).join(" · ")}${d.face_prob != null ? ` · <b>Face model:</b> <b style="color:${d.face_prob >= 0.5 ? "var(--bad)" : "var(--good)"}">${pct(d.face_prob)}</b>` : ""}</div>` : ""}
       <div class="imgpair"><img src="${src}" alt="uploaded">
       ${d.gradcam_png ? `<div><img src="data:image/png;base64,${d.gradcam_png}" alt="Occlusion map"><div class="small">Occlusion map: red areas = regions that drive the decision</div></div>` : ""}</div>
     </div></div>`;

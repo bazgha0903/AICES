@@ -6,9 +6,10 @@ import io
 import json
 
 from flask import Flask, jsonify, render_template, request
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from core import analyzers, registry
+from core.metadata import read_metadata
 from core.explain import HAS_LIME
 from core.scoring import WEIGHTS, overall_score
 
@@ -81,8 +82,10 @@ def api_analyze_image():
         img.load()
     except (UnidentifiedImageError, OSError):
         return jsonify({"error": "this is not a valid image file"}), 400
+    meta = read_metadata(img)          # read EXIF before we change the image
+    img = ImageOps.exif_transpose(img)  # phone photos: apply the saved rotation so the model sees it upright
     versions = _versions(request.form.get("version", "baseline"))
-    return jsonify({"results": [{"version": v, "deepfake": analyzers.analyze_image(img, v)} for v in versions]})
+    return jsonify({"results": [{"version": v, "deepfake": analyzers.analyze_image(img, v, meta)} for v in versions]})
 
 
 if __name__ == "__main__":

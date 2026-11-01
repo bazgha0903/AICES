@@ -11,4 +11,7 @@ lime                # explainability (without it, the app shows Logistic Regress
 # Pretrained models: one-sided bias (NLI), hallucination contradiction check (NLI), AI-image detector
 torch
 transformers
-# TensorFlow is only needed for the older Keras image notebooks in training/ (not used by the app)
+
+# Face check of the image module (face CNN in Keras + OpenCV face detector)
+tensorflow
+opencv-python-headless<5   # OpenCV 5 removed the Haar face detector (cv2.CascadeClassifier)

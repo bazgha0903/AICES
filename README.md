@@ -9,7 +9,7 @@ AICES checks AI-generated content before you trust it. Paste an AI answer (or up
 | | **One-sided** arguments (only one side of a debate) | Pretrained NLI model, zero-shot (fallback: TF-IDF + LR) | IBM Claim Stance (fallback) |
 | **M2 Hallucination** | facts not supported by, or contradicting, the evidence | 3 knowledge-overlap features + Logistic Regression **+** NLI contradiction check | HaluEval (QA) |
 | **M3 Privacy** | names, emails, phones, addresses, Aadhaar, PAN, ... | Word-level Logistic Regression tagger **+** regex for Indian IDs | ai4privacy |
-| **M4 AI-generated image** | how suspicious an image is of being AI-generated | Pretrained Swin Transformer detector | pretrained |
+| **M4 AI-generated image** | how suspicious an image is of being AI-generated | Ensemble of 3 pretrained detectors (Swin, SwinV2, SigLIP) **+** face CNN check + camera-metadata check | pretrained · 140k Real and Fake Faces (face CNN) |
 | **XAI** | why each decision was made | LIME / LR word weights, feature contributions, highlighted spans, occlusion map | — |
 
 The three text modules are combined into one **Integrity Score** (weighted harmonic mean) with a verdict:
@@ -32,7 +32,9 @@ python app.py
 
 Open **http://127.0.0.1:5000**.
 
-- The pretrained models (NLI and image detector) are downloaded once from HuggingFace on first use.
+- The pretrained models (NLI and image detectors) are downloaded once from HuggingFace on first use.
+- The face model `m4_deepfake_cnn.keras` is trained with `training/m4_deepfake_faces.ipynb` (Kaggle) and
+  goes into `app/models/baseline/`.
 - **Load sample** fills in a demo text. The ☀ / ☾ button switches dark / light mode.
 - The **Pipeline & Models**, **Benchmarks & Formula** and **History** tabs explain the system.
 
@@ -56,7 +58,7 @@ mixed sample) and prints a PASS / FAIL table. **Current result: 10 / 10 pass.**
 
 ```
 text → split into sentences → M1 Bias · M2 Hallucination · M3 Privacy → explanations → Integrity Score
-image → M4 detector → suspicion % + occlusion map (shown separately)
+image → M4 detectors (+ face check) → suspicion % + occlusion map (shown separately)
 ```
 
 ### M1 Bias
@@ -105,10 +107,24 @@ simple average gives 66, the harmonic mean gives 26. One leaked phone number mak
 
 ### M4 AI-generated image
 
-A pretrained Swin Transformer detector (`Organika/sdxl-detector`, set in
-`app/models/baseline/m4_hf_detector.json`) gives P(AI-generated), shown as a suspicion level
-(Low < 30%, Medium 30–70%, High ≥ 70%). The occlusion map greys out 3 × 3 regions one at a time; red regions
-change the prediction most. The model licence is CC-BY-NC (non-commercial use).
+Three pretrained detectors trained on different data look at the full image and up to 5 crops:
+`Organika/sdxl-detector` (Swin), `haywoodsloan/ai-image-detector-deploy` (SwinV2) and
+`Ateeqq/ai-vs-human-image-detector` (SigLIP), set in `app/models/baseline/m4_hf_detector.json`.
+
+- **Final P(AI) = median of the three**, so one over-confident detector cannot decide alone
+  (one detector alone called several real phone and webcam photos 94–100% AI; the median fixed most of them).
+- Levels: Low < 30%, Uncertain 30–90%, High ≥ 90%. **High also needs every detector to be at least 80% sure**,
+  because calling a real photo AI-generated is the worse mistake.
+- Camera EXIF metadata (make, model, date) is read; a photo with camera metadata is never marked High,
+  and traces of an AI tool in the file mark it High.
+- **Face check** (only for an Uncertain result): OpenCV finds the faces, and a CNN trained by us on
+  *140k Real and Fake Faces* (Keras, 128 × 128) scores each face. With several faces the median is used,
+  so one dark or half-cut face cannot decide alone. If the faces get P(AI) < 20%, the result becomes
+  **Likely real** (the badge then says "Low (face check)"). The face check can never turn a result into
+  "AI-generated": the face CNN was trained on older StyleGAN faces, so it is used only to rescue real
+  photos, not to accuse.
+- The occlusion map greys out 3 × 3 regions one at a time; red regions change the prediction most.
+- Licences differ per model (sdxl-detector is CC-BY-NC, non-commercial).
 
 ---
 
@@ -138,6 +154,7 @@ aices/
     ├── core/
     │   ├── analyzers.py         logic of every module (bias, hallucination, privacy, image)
     │   ├── models.py            model wrappers (scikit-learn, HuggingFace, Keras)
+    │   ├── metadata.py          camera / AI-tool EXIF metadata of images
     │   ├── registry.py          which model file each module loads
     │   ├── features.py          M2 and M3 features (identical copy in the training notebooks)
     │   ├── explain.py           LIME / word weights
@@ -178,8 +195,9 @@ aices/
 `train_all_baseline.ipynb` trains all of them in one run. Install the same scikit-learn version as on Kaggle
 (`scikit-learn==1.6.1`), otherwise the `.joblib` files will not load.
 
-The `m4_*` notebooks are earlier experiments for the image module (a CNN on CIFAKE, a CNN on 140k Real and
-Fake Faces, and CLIP + Logistic Regression). They are kept for reference; the app uses the pretrained detector.
+`m4_deepfake_faces.ipynb` (Kaggle: 140k Real and Fake Faces, GPU T4) trains the face CNN of the face check
+(`m4_deepfake_cnn.keras`). `m4_deepfake_cnn` (CNN on CIFAKE) and `m4_clip_ai_image` (CLIP + Logistic
+Regression) are earlier experiments for the image module, kept for reference.
 
 ---
 
@@ -190,6 +208,10 @@ Each fix below came from a test case that failed:
 - The first image model (CNN on CIFAKE) called a real photo 76% fake; Grad-CAM showed it was looking at the
   background (domain shift). A face-only CNN then failed on non-face images, so the app now uses a general
   pretrained detector.
+- Smooth, evenly lit webcam selfies were called 81–95% AI by the general detectors. A rule that
+  "High" needs every detector to be ≥ 80% sure turned them into Uncertain, and a face CNN trained on
+  real and AI faces then marks them Likely real. In a group photo one dark face scored 28%, so the
+  median over all faces is used instead of only the largest face.
 - The identity model (trained on Jigsaw, a toxicity dataset) flagged insults with no group as identity bias,
   so an identity-group lexicon was added.
 - The trained stance model called every sentence neutral on new topics, so one-sidedness now uses a
@@ -204,8 +226,10 @@ Each fix below came from a test case that failed:
 - English only.
 - TF-IDF models look at words, not meaning: sarcasm, negation and paraphrases can be misjudged.
 - Wikipedia search does not always return the right page for vague questions.
-- No AI-image detector catches every generator; new generators and heavily compressed images can be missed,
-  so the result is a suspicion level, not a final answer.
+- No AI-image detector catches every generator; new generators and heavily compressed images can be missed.
+  Smooth, evenly lit webcam selfies can look AI-generated to the detectors; the strong-agreement rule and
+  the face check handle most of them. The face CNN only knows StyleGAN faces, and photos without a face
+  rely on the detectors alone. The result is a suspicion level, not a final answer.
 
 ## Future scope
 
@@ -213,3 +237,7 @@ Fine-tuned transformers for every module (DistilBERT / RoBERTa for bias, DeBERTa
 DistilBERT NER for privacy), video deepfake detection and Hindi support. The `models/advanced/` slot and the
 `SHOW_ADVANCED` switch in `app/app.py` are ready for this: every model exposes the same interface, so no app
 code needs to change.
+
+## Author
+
+**Bazgha Arshi** · B.Tech CSE, Ramgarh Engineering College (2022–2026)

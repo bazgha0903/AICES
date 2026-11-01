@@ -1,4 +1,8 @@
 {
-  "model": "Organika/sdxl-detector",
-  "note": "Pretrained Swin Transformer AI-image detector from HuggingFace (license CC-BY-NC-3.0, non-commercial). Change 'model' to try another image-classification detector."
+  "models": [
+    "Organika/sdxl-detector",
+    "haywoodsloan/ai-image-detector-deploy",
+    "Ateeqq/ai-vs-human-image-detector"
+  ],
+  "note": "Ensemble of pretrained AI-image detectors from HuggingFace. Final P(AI) = median of their scores. A model that cannot be loaded is skipped. Licences differ per model (sdxl-detector: CC-BY-NC-3.0, non-commercial)."
 }

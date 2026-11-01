@@ -14,7 +14,7 @@ from .registry import MODELS_DIR, get_model
 from .text_utils import split_sentences
 from . import wiki
 
-CODE_VERSION = "27-oct v6 (contradiction + entity + same-topic check)"
+CODE_VERSION = "1-nov v10 (ensemble + strong agreement + face veto, median of faces)"
 FLAG_THRESHOLD = 0.5
 NEUTRAL_LOW, NEUTRAL_HIGH = 0.4, 0.6  # stance: probability in this range = neutral
 
@@ -410,25 +410,147 @@ def analyze_privacy(text, version):
 # ---------------------------------------------------------------------------
 # M4: Deepfake image
 # ---------------------------------------------------------------------------
+LOW_MAX, HIGH_MIN = 0.30, 0.90  # Low < 30% · Uncertain 30-90% · High >= 90%
+STRONG = 0.80  # "High" also needs EVERY detector to be at least this sure
+
+
 def suspicion_level(p):
-    """P(AI-generated) -> suspicion level shown to the user."""
-    if p >= 0.7:
+    """P(AI-generated) -> suspicion level shown to the user.
+    High needs >= 90%: the detector is often over-confident on real phone photos,
+    so anything between 30% and 90% is shown as 'Uncertain' instead of 'AI'."""
+    if p >= HIGH_MIN:
         return "High"
-    if p >= 0.3:
+    if p >= LOW_MAX:
         return "Medium"
     return "Low"
 
 
-def analyze_image(img, version):
-    """Any image -> how suspicious it is of being AI-generated (pretrained detector)."""
+# ---- Face veto -------------------------------------------------------------
+# The three general detectors were trained on internet photos and AI art. Smooth, evenly lit
+# webcam selfies can fool all of them. A CNN trained only on faces (140k real and AI faces,
+# training/m4_deepfake_faces.ipynb) is a specialist for exactly this case. It is used only as
+# a veto: it can turn "Uncertain" into "Real", but never overrules a confident "AI" result
+# (it was trained on older StyleGAN faces, so it may miss faces from newer AI tools).
+# With several faces (group photo) the median over the faces is used.
+FACE_MODEL_FILE = "m4_deepfake_cnn.keras"
+FACE_REAL_MAX = 0.20  # face model must say P(AI) < 20% (= at least 80% sure it is real)
+_FACE = {}
+
+
+def _face_tools():
+    """(face detector, face CNN) loaded once, or None if OpenCV / TensorFlow / the model file is missing."""
+    if "t" not in _FACE:
+        try:
+            import cv2
+
+            from .models import KerasImageClassifier
+
+            path = MODELS_DIR / "baseline" / FACE_MODEL_FILE
+            if not path.exists():
+                raise FileNotFoundError(path)
+            cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            _FACE["t"] = (cv2, cascade, KerasImageClassifier(str(path)))
+        except Exception:
+            _FACE["t"] = None
+    return _FACE["t"]
+
+
+MAX_FACES = 5  # check at most the 5 largest faces (keeps group photos fast)
+
+
+def face_check(img):
+    """Check every face (up to MAX_FACES) with the face CNN.
+
+    Returns (median P(AI) over the faces, number of faces), or (None, 0) if no face / no model.
+    The median is used so that one dark, blurred or half-cut face in a group photo cannot
+    decide the result alone (e.g. faces at 28% and 0.5% -> median 14%)."""
+    tools = _face_tools()
+    if tools is None:
+        return None, 0
+    cv2, cascade, cnn = tools
+    rgb = img.convert("RGB")
+    gray = np.asarray(rgb.convert("L"))
+    side = min(gray.shape[:2])
+    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
+                                     minSize=(max(40, side // 6), max(40, side // 6)))
+    if len(faces) == 0:
+        return None, 0
+    faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)[:MAX_FACES]
+    probs = []
+    for x, y, w, h in faces:
+        # The training faces show the whole head, so add a margin around the detected face
+        m = int(0.35 * max(w, h))
+        box = (max(0, x - m), max(0, y - m), min(rgb.width, x + w + m), min(rgb.height, y + h + m))
+        probs.append(float(cnn.predict(rgb.crop(box))))
+    return float(np.median(probs)), len(probs)
+
+
+def _fmt_prob(p):
+    return "< 0.0001" if p < 0.0001 else f"{p:.4f}"
+
+
+def analyze_image(img, version, meta=None):
+    """Any image -> how suspicious it is of being AI-generated.
+    Final decision = detector score + metadata check (camera EXIF / AI-tool traces)."""
     model, err = get_model("deepfake", version)
     if model is None:
         return _unavailable(err)
-    p = model.predict(img)  # P(AI-generated)
+    meta = meta or {}
+    p = model.predict(img)  # P(AI-generated), median of the detectors
     level = suspicion_level(p)
-    out = {"available": True, "model": model.kind, "prob_fake": round(p, 4),
+    notes = []
+    scores = dict(getattr(model, "last_scores", {}) or {})
+    if len(scores) > 1:
+        votes = sum(v >= 0.5 for v in scores.values())
+        notes.append(f"{votes} of {len(scores)} detectors say AI-generated.")
+        weakest = min(scores.values())
+        if level == "High" and weakest < STRONG:
+            # Calling a real photo "AI-generated" is the worse mistake, so "High" needs every
+            # detector to be strongly sure (>= 80%). Otherwise the result is only Uncertain.
+            level = "Medium"
+            notes.append(f"Not every detector is strongly sure (lowest {weakest:.0%} < {STRONG:.0%}), "
+                         "so the result is marked Uncertain instead of AI-generated.")
+
+    if meta.get("ai_tool"):
+        # The file itself says it was made by an AI tool: strongest evidence.
+        level = "High"
+        notes.append(meta["ai_tool"] + ".")
+    elif meta.get("camera"):
+        cam = f"Camera metadata found: {meta['camera']}"
+        if meta.get("date_taken"):
+            cam += f", taken {meta['date_taken']}"
+        notes.append(cam + ".")
+        if level == "High":
+            # Model says AI, but the file comes from a real camera -> do not call it AI.
+            level = "Medium"
+            notes.append("The model score is high, but camera metadata points to a real photo, "
+                         "so the result is marked Uncertain (phone camera processing can confuse the model).")
+    else:
+        notes.append("No camera metadata found (it may have been removed, e.g. by WhatsApp, screenshots or editing apps).")
+
+    # Face veto: only turns "Uncertain" into "Real", never touches a confident result.
+    p_face = None
+    if level == "Medium" and not meta.get("ai_tool"):
+        p_face, n_faces = face_check(img)
+        if p_face is not None:
+            what = "this face is" if n_faces == 1 else f"the {n_faces} faces are (median)"
+            if p_face < FACE_REAL_MAX:
+                level = "Low"
+                notes.append(f"Face check: the face model (trained on 140k real and AI faces) is "
+                             f"{1 - p_face:.0%} sure {what} real, so the result is marked Likely real.")
+            else:
+                notes.append(f"Face check: the face model gives P(AI) = {p_face:.0%} for {n_faces} "
+                             f"face(s) (median), so the result stays Uncertain.")
+
+    notes.append("AI-image detection is not 100% accurate; use this as a signal, not proof.")
+    out = {"available": True, "model": model.kind, "prob_fake": round(p, 6), "prob_text": _fmt_prob(p),
            "suspicion": round(100 * p, 1), "level": level,
-           "label": {"High": "LIKELY AI-GENERATED", "Medium": "SUSPICIOUS", "Low": "LIKELY REAL"}[level]}
+           "label": {"High": "LIKELY AI-GENERATED", "Medium": "UNCERTAIN", "Low": "LIKELY REAL"}[level],
+           "camera": meta.get("camera"), "ai_tool": meta.get("ai_tool"), "notes": notes,
+           "detectors": [{"name": k, "prob": round(v, 4)} for k, v in scores.items()],
+           "face_prob": None if p_face is None else round(p_face, 4),
+           "skipped": getattr(model, "skipped", {}),
+           "thresholds": f"Low < {LOW_MAX:.0%} · Uncertain {LOW_MAX:.0%}–{HIGH_MIN:.0%} · High ≥ {HIGH_MIN:.0%}"}
     try:
         png = model.gradcam(img, p)
         out["gradcam_png"] = base64.b64encode(png).decode() if png else None

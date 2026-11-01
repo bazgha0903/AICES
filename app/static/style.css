@@ -136,7 +136,7 @@ mark.pii sup { font-family: "IBM Plex Mono", monospace; font-size: 9px; font-wei
 .na { color: var(--muted); font-size: 13px; font-style: italic; margin-top: 4px; }
 .error { color: var(--bad); font-weight: 600; }
 .imgpair { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; margin-top: 12px; }
-.imgpair img { width: 200px; height: 200px; object-fit: cover; border: 1px solid var(--line); }
+.imgpair img { width: 200px; height: 200px; object-fit: contain; background: #fff; border: 1px solid var(--line); }
 .loading { display: flex; align-items: center; gap: 10px; }
 .loading::before { content: ""; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -194,3 +194,4 @@ mark.pii sup { font-family: "IBM Plex Mono", monospace; font-size: 9px; font-wei
 .reasons { list-style: none; padding: 0; margin: 10px 0 12px; display: grid; gap: 4px; font-size: 14px; }
 
 .btype { margin: 6px 0 10px; }
+.notes { margin: 8px 0 0; padding-left: 18px; }

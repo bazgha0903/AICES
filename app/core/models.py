@@ -296,36 +296,92 @@ class KerasImageClassifier:
         return overlay_heatmap(img, heatmap)
 
 
-class HFImageDetector:
-    """M4: pretrained AI-generated image detector from HuggingFace (Swin Transformer,
-    default "Organika/sdxl-detector", fine-tuned on real photos vs AI images).
-    Runs locally (no API); downloaded once on first use and then cached."""
+class _OneDetector:
+    """One pretrained HuggingFace AI-image classifier. Finds which output label means 'AI'."""
 
-    AI_WORDS = ("artificial", "fake", "generated", "ai")
+    AI_LABELS = ("artificial", "ai", "ai_gen", "ai image", "fake", "generated", "deepfake", "synthetic")
+
+    def __init__(self, name, torch):
+        from transformers import AutoImageProcessor, AutoModelForImageClassification
+
+        self.name, self.torch = name, torch
+        self.processor = AutoImageProcessor.from_pretrained(name)
+        self.model = AutoModelForImageClassification.from_pretrained(name).eval()
+        labels = {int(i): str(l).lower().strip() for i, l in self.model.config.id2label.items()}
+        ai = [i for i, l in labels.items()
+              if l in self.AI_LABELS or l.startswith("ai") or any(w in l for w in ("artificial", "fake", "generated"))]
+        if not ai:
+            raise ValueError(f"{name}: cannot tell which label means AI ({labels})")
+        self.ai_index = ai[0]
+
+    def probs(self, imgs):
+        with self.torch.no_grad():
+            x = self.processor(images=[i.convert("RGB") for i in imgs], return_tensors="pt")
+            p = self.torch.softmax(self.model(**x).logits, dim=-1)[:, self.ai_index]
+        return p.numpy()
+
+
+class HFImageDetector:
+    """M4: ensemble of pretrained AI-generated image detectors from HuggingFace.
+
+    One detector alone is often over-confident on ordinary real photos (dark webcam pictures,
+    phone photos with heavy processing). Several detectors trained on different data make
+    different mistakes, so the final P(AI) is the MEDIAN of their scores: a single detector
+    cannot call a real photo 'AI' on its own. Each detector also looks at the full image and
+    up to 5 crops (median), so one odd region cannot flip the result.
+    Runs locally (no API); every model is downloaded once on first use and then cached.
+    A model that cannot be loaded is skipped, so the app keeps working with the others."""
 
     def __init__(self, path):
         import json
 
         import torch
-        from transformers import AutoImageProcessor, AutoModelForImageClassification
 
         cfg = json.loads(open(path, encoding="utf-8").read())
-        self.torch = torch
-        self.processor = AutoImageProcessor.from_pretrained(cfg["model"])
-        self.model = AutoModelForImageClassification.from_pretrained(cfg["model"]).eval()
-        labels = {i: l.lower() for i, l in self.model.config.id2label.items()}
-        self.ai_index = next((i for i, l in labels.items() if any(w in l for w in self.AI_WORDS)), 0)
-        self.kind = f"Pretrained Swin Transformer detector ({cfg['model']})"
+        names = cfg.get("models") or [cfg["model"]]
+        self.detectors, self.skipped = [], {}
+        for name in names:
+            try:
+                self.detectors.append(_OneDetector(name, torch))
+            except Exception as e:  # no internet, unsupported model, unknown labels ...
+                self.skipped[name] = str(e)[:200]
+        if not self.detectors:
+            raise RuntimeError(f"no AI-image detector could be loaded: {self.skipped}")
+        n = len(self.detectors)
+        self.kind = (f"Ensemble of {n} pretrained detectors (median)" if n > 1
+                     else f"Pretrained detector ({self.detectors[0].name})")
+        self.last_scores = {}
+
+    @staticmethod
+    def _views(img, max_side=1024, crop=512):
+        """Full image + up to 5 crops (centre and 4 corners).
+
+        Phone photos are huge (e.g. 4000x3000). Squeezing the whole photo into the
+        model's 224x224 input makes it look very smooth, and smooth = "AI" for these
+        detectors. Crops keep the real camera texture (noise, grain)."""
+        from PIL import Image
+
+        img = img.convert("RGB")
+        if max(img.size) > max_side:
+            img = img.copy()
+            img.thumbnail((max_side, max_side), Image.LANCZOS)
+        views = [img]
+        w, h = img.size
+        if min(w, h) >= int(crop * 1.25):  # only crop when the image is big enough
+            for x, y in [((w - crop) // 2, (h - crop) // 2), (0, 0), (w - crop, 0), (0, h - crop), (w - crop, h - crop)]:
+                views.append(img.crop((x, y, x + crop, y + crop)))
+        return views
 
     def _probs(self, imgs):
-        torch = self.torch
-        with torch.no_grad():
-            x = self.processor(images=[i.convert("RGB") for i in imgs], return_tensors="pt")
-            p = torch.softmax(self.model(**x).logits, dim=-1)[:, self.ai_index]
-        return p.numpy()
+        """P(AI) for each image = median over the detectors."""
+        return np.median(np.stack([d.probs(imgs) for d in self.detectors]), axis=0)
 
     def predict(self, img):
-        return float(self._probs([img])[0])  # P(AI-generated)
+        """P(AI-generated) = median over detectors of (median over full image + crops).
+        The score of every detector is kept in last_scores to show in the app."""
+        views = self._views(img)
+        self.last_scores = {d.name: float(np.median(d.probs(views))) for d in self.detectors}
+        return float(np.median(list(self.last_scores.values())))
 
     def gradcam(self, img, prob_fake, grid=3):
         """Occlusion map: grey out each of 3×3 regions and measure how much P(AI) changes.
